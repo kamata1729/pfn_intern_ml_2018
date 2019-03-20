@@ -70,6 +70,22 @@ def sign(x):
     return x
 
 
+def plot(ygrid, ygrid_name, fgsm_accs, baseline_accs, filename):
+    plt.plot(ygrid, fgsm_accs, label='FGSM')
+    plt.plot(ygrid, baseline_accs, label='baseline')
+    plt.xlabel(ygrid_name)
+    plt.ylabel('accuracy')
+    plt.legend()
+    plt.savefig(filename)
+    print("saved: ", filename)
+    return
+
+
+#################################################
+# Derection 1
+#################################################
+
+
 def predict(params, img):
     a_1 = params['W_1']@img + params['b_1']
     h_1 = relu(a_1)
@@ -80,7 +96,7 @@ def predict(params, img):
     return f_x
 
 
-def predict_with_backward(params, img, t):
+def predict_with_backward(params, img, t, return_prob=False):
     def backward(p, q):
         return p * (q > 0)
 
@@ -100,7 +116,10 @@ def predict_with_backward(params, img, t):
     nabla_a1 = backward(nabla_h1, a_1)
     nabla_x = params['W_1'].T @ nabla_a1
 
-    return nabla_x
+    if return_prob:
+        return nabla_x, f_x
+    else:
+        return nabla_x
 
 
 def baseline_img(img, eps_0=0.1):
@@ -111,11 +130,6 @@ def fgsm_img(params, img, t, eps_0=0.1):
     nabla_x = predict_with_backward(params, img, t)
     img_fgsm = img + eps_0 * sign(nabla_x)
     return img_fgsm
-
-
-#################################################
-# Derection 1
-#################################################
 
 
 def execute_fgsm_repeat(params, labels, eps_0=0.01, repeat_count=0):
@@ -133,6 +147,20 @@ def execute_fgsm_repeat(params, labels, eps_0=0.01, repeat_count=0):
 
     return {"fgsm": np.sum(predicts_fgsm == labels) / len(labels),
             "baseline": np.sum(predicts_baseline == labels) / len(labels)}
+
+def direction1():
+    params = read_params()
+    labels = read_labels()
+    max_count = 10
+    fgsm_accs = np.zeros(max_count)
+    baseline_accs = np.zeros(max_count)
+    for i, repeat_count in enumerate(range(max_count)):
+        result = execute_fgsm_repeat(
+            params, labels, repeat_count=repeat_count)
+        fgsm_accs[i] = result['fgsm']
+        baseline_accs[i] = result['baseline']
+    plot(list(range(max_count)), "repeat count",
+        fgsm_accs, baseline_accs, "plot_repeat.png")
 
 
 #################################################
@@ -171,45 +199,95 @@ def execute_fgsm_mono(params, labels, rho=0.05):
     return {"fgsm": np.sum(predicts_fgsm == labels) / len(labels),
             "baseline": np.sum(predicts_baseline == labels) / len(labels)}
 
+def direction2():
+    params = read_params()
+    labels = read_labels()
+    rhos = [0, 0.05, 0.1, 0.2, 0.5, 0.8]
+    fgsm_accs = np.zeros_like(rhos)
+    baseline_accs = np.zeros_like(rhos)
+    for i, rho in enumerate(rhos):
+        result = execute_fgsm_mono(params, labels, rho)
+        fgsm_accs[i] = result['fgsm']
+        baseline_accs[i] = result['baseline']
+    plot(rhos, 'noise proportion', fgsm_accs,
+            baseline_accs, 'plot_mono.png')
 
-def plot(ygrid, ygrid_name, fgsm_accs, baseline_accs, filename):
-    plt.plot(ygrid, fgsm_accs, label='FGSM')
-    plt.plot(ygrid, baseline_accs, label='baseline')
-    plt.xlabel(ygrid_name)
-    plt.ylabel('accuracy')
-    plt.legend()
-    plt.savefig(filename)
-    print("saved: ", filename)
-    return
+
+#################################################
+# Derection 3
+#################################################
+
+
+def predict_ensamble(params_list, img):
+    result = 0
+    for params in params_list:
+        result += predict(params, img)
+    return result / len(params_list)
+
+
+def fgsm_img_ensemble(params_list, img, t, eps_0=0.1, weighted_sum=True):
+    nabla_x = 0
+    if weighted_sum:
+        nabla_x = np.zeros((len(params_list), 1024))
+        f_x = np.zeros((len(params_list), 23))
+        for i, params in enumerate(params_list):
+            nabla_x[i], f_x[i] = predict_with_backward(
+                params, img, t, return_prob=True)
+        nabla_x = nabla_x.T @ f_x[:, t]
+    else:
+        for params in params_list:
+            nabla_x += predict_with_backward(params, img, t)
+    nabla_x /= len(params_list)
+    img_fgsm = img + eps_0 * sign(nabla_x)
+    return img_fgsm
+
+
+def execute_fgsm_ensemble(params_list, labels, eps_0=0.1, weighted_sum=True):
+    predicts_fgsm = np.zeros(len(labels))
+    predicts_baseline = np.zeros(len(labels))
+    for i in tqdm(range(len(labels)), desc='eps_0={}'.format(eps_0)):
+        img = read_img("pgm/{}.pgm".format(i+1))
+        img_fgsm = fgsm_img_ensemble(
+            params_list, img, labels[i], eps_0, weighted_sum)
+        img_baseline = baseline_img(img, eps_0)
+        predicts_fgsm[i] = predict_ensamble(params_list, img_fgsm).argmax()
+        predicts_baseline[i] = predict_ensamble(
+            params_list, img_baseline).argmax()
+
+    return {"fgsm": np.sum(predicts_fgsm == labels) / len(labels),
+            "baseline": np.sum(predicts_baseline == labels) / len(labels)}
+
+
+def direction3(weighted_sum):
+    params_list = [read_params(
+        'extra/param_{}.txt'.format(i+1)) for i in range(9)]
+    labels = read_labels()
+    epss = [0, 0.05, 0.1, 0.2, 0.5, 0.8]
+    fgsm_accs = np.zeros_like(epss)
+    baseline_accs = np.zeros_like(epss)
+    for i, eps in enumerate(epss):
+        result = execute_fgsm_ensemble(
+            params_list, labels, eps_0=eps, weighted_sum=weighted_sum)
+        fgsm_accs[i] = result['fgsm']
+        baseline_accs[i] = result['baseline']
+    plot(epss, 'eps_0', fgsm_accs, baseline_accs, 'plot_ensamble_' +
+            ('' if weighted_sum else 'non_') + 'weighted.png')
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('direction', type=int, choices=[1,2,3])
+    parser.add_argument('--weighted_sum', action='store_true')
     args = parser.parse_args()
 
     if args.direction == 1:
-        params = read_params()
-        labels = read_labels()
-        max_count = 10
-        fgsm_accs = np.zeros(max_count)
-        baseline_accs = np.zeros(max_count)
-        for i, repeat_count in enumerate(range(max_count)):
-            result = execute_fgsm_repeat(params, labels, repeat_count=repeat_count)
-            fgsm_accs[i] = result['fgsm']
-            baseline_accs[i] = result['baseline']
-        plot(list(range(max_count)), "repeat count", fgsm_accs, baseline_accs, "plot_repeat.png")
+        direction1()
 
     if args.direction == 2:
-        params = read_params()
-        labels = read_labels()
-        rhos = [0, 0.05, 0.1, 0.2, 0.5, 0.8]
-        fgsm_accs = np.zeros_like(rhos)
-        baseline_accs = np.zeros_like(rhos)
-        for i, rho in enumerate(rhos):
-            result = execute_fgsm_mono(params, labels, rho)
-            fgsm_accs[i] = result['fgsm']
-            baseline_accs[i] = result['baseline']
-        plot(rhos, 'noise proportion', fgsm_accs, baseline_accs, 'plot_mono.png')
+        direction2()
+
+    if args.direction == 3:
+        direction3(args.weighted_sum)
 
         
 

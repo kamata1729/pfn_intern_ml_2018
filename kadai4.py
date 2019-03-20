@@ -132,13 +132,13 @@ def fgsm_img(params, img, t, eps_0=0.1):
     return img_fgsm
 
 
-def execute_fgsm_repeat(params, labels, eps_0=0.01, repeat_count=0):
+def execute_fgsm_repeat(params, labels, eps_0=0.01, repeat_count=1):
     predicts_fgsm = np.zeros(len(labels))
     predicts_baseline = np.zeros(len(labels))
     for i in tqdm(range(len(labels)), desc='eps_0={}'.format(eps_0)):
         img = read_img("pgm/{}.pgm".format(i+1))
-        img_fgsm = fgsm_img(params, img, labels[i], eps_0)
-        img_baseline = baseline_img(img, eps_0)
+        img_fgsm = img.copy()
+        img_baseline = img.copy()
         for _ in range(repeat_count):
             img_fgsm = fgsm_img(params, img_fgsm, labels[i], eps_0)
             img_baseline = baseline_img(img_baseline, eps_0)
@@ -233,11 +233,11 @@ def fgsm_img_ensemble(params_list, img, t, eps_0=0.1, weighted_sum=True):
         for i, params in enumerate(params_list):
             nabla_x[i], f_x[i] = predict_with_backward(
                 params, img, t, return_prob=True)
-        nabla_x = nabla_x.T @ f_x[:, t]
+        nabla_x = nabla_x.T @ f_x[:, t] / np.sum(f_x[:, t])
     else:
         for params in params_list:
             nabla_x += predict_with_backward(params, img, t)
-    nabla_x /= len(params_list)
+        nabla_x /= len(params_list)
     img_fgsm = img + eps_0 * sign(nabla_x)
     return img_fgsm
 

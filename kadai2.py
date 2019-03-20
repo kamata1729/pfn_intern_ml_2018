@@ -52,7 +52,7 @@ def predict(params, img):
     a_2 = linear(h_1, params['W_2'], params['b_2'][0])
     h_2 = relu(a_2)
     y = linear(h_2, params['W_3'], params['b_3'][0])
-    result = sigmoid(y)
+    result = softmax(y)
     return result
 
 

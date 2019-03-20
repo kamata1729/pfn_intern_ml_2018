@@ -4,7 +4,7 @@ def relu(x: list):
     return list(map(lambda x: max(x, 0), x))
 
 
-def sigmoid(x: list):
+def softmax(x: list):
     exp_list = list(map(lambda a: math.exp(a), x))
     return list(map(lambda a: a/sum(exp_list), exp_list))
 

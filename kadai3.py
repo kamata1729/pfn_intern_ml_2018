@@ -21,7 +21,7 @@ def predict_with_backward(params, img, t):
     a_2 = linear(h_1, params['W_2'], params['b_2'][0])
     h_2 = relu(a_2)
     y = linear(h_2, params['W_3'], params['b_3'][0])
-    f_x = sigmoid(y)
+    f_x = softmax(y)
 
     # backward
     nabla_y = sub(f_x, one_hot(t, len(f_x)))
